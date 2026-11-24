@@ -2,27 +2,18 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <!-- Imposta la visualizzazione adattiva (responsive) per smartphone, tablet e desktop -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BandBook - Repertorio & Tab</title>
-
-    <!-- Tailwind CSS: libreria esterna per applicare velocemente le classi di stile (colori, margini, griglie) -->
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- PapaParse: libreria esterna per scaricare e trasformare il CSV di Google Sheets in oggetti JavaScript -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-
     <style>
-        /* Sfondo scuro, testo chiaro e font di sistema per la pagina */
         body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
-
-        /* Font a spaziatura fissa e a capo automatico per mantenere allineate tab e testi */
         .tab-text { font-family: 'Courier New', Courier, monospace; white-space: pre-wrap; line-height: 1.4; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
 
-    <!-- Barra superiore fissa con titolo dell'app e pulsante per ricaricare i dati dal foglio -->
+    <!-- Header -->
     <header class="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-10 shadow-lg">
         <div class="max-w-3xl mx-auto flex justify-between items-center">
             <h1 class="text-xl font-bold text-amber-400 tracking-wide">🎸 BAND BOOK</h1>
@@ -32,100 +23,106 @@
         </div>
     </header>
 
-    <!-- Contenitore principale centrato -->
+    <!-- Contenuto principale -->
     <main class="flex-1 max-w-3xl w-full mx-auto p-4">
 
-        <!-- VISTA 1: Elenco brani e barra di ricerca (visibile all'avvio) -->
+        <!-- VISTA 1: Lista brani -->
         <div id="vista-lista">
-            <!-- Filtra in tempo reale i brani mentre si digita -->
-            <input type="text" id="cerca" onkeyup="filtraBrani()" placeholder="🔍 Cerca titolo o artista..." 
+            <input type="text" id="cerca" onkeyup="filtraBrani()" placeholder="🔍 Cerca titolo o artista..."
                 class="w-full p-3 mb-4 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:border-amber-400">
-            
-            <!-- Messaggio mostrato durante il download del CSV -->
-            <div id="stato-caricamento" class="text-center text-slate-400 py-10">Caricamento repertorio...</div>
 
-            <!-- Contenitore dove verranno inserite le schede dei brani -->
+            <div id="stato-caricamento" class="text-center text-slate-400 py-10">Caricamento repertorio...</div>
             <div id="elenco-brani" class="space-y-3"></div>
         </div>
 
-        <!-- VISTA 2: Dettaglio del brano selezionato (nascosta finché non si clicca su una canzone) -->
+        <!-- VISTA 2: Dettaglio brano -->
         <div id="vista-dettaglio" class="hidden">
-            <!-- Pulsante per tornare all'elenco dei brani -->
             <button onclick="tornaAllaLista()" class="mb-4 inline-flex items-center text-sm text-amber-400 hover:underline">
                 ← Torna alla scaletta
             </button>
 
-            <!-- Intestazione con titolo e artista del brano -->
             <div class="bg-slate-800/60 p-4 rounded-xl border border-slate-700 mb-5">
                 <h2 id="det-titolo" class="text-2xl font-bold text-white"></h2>
                 <p id="det-artista" class="text-slate-400 text-sm"></p>
             </div>
 
-            <!-- Selettore strumenti e testo: i pulsanti vengono generati dinamicamente da JavaScript -->
             <p class="text-xs uppercase tracking-wider text-slate-400 mb-2 font-semibold">Seleziona strumento o testo:</p>
             <div id="bottoni-strumenti" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5"></div>
 
-            <!-- Riquadro dove compare il testo se la cella non contiene un link -->
             <div id="area-tab" class="bg-black border border-slate-700 rounded-xl p-4 min-h-[250px] shadow-inner">
-                <p class="text-slate-500 text-center py-10">Seleziona uno strumento qui sopra per visualizzare la tab o il testo.</p>
+                <p class="text-slate-500 text-center py-10">Seleziona uno strumento o Lyrics qui sopra.</p>
             </div>
         </div>
 
     </main>
 
     <script>
-        // URL del Google Sheet pubblicato sul web in formato CSV (fa da sorgente dati)
+        // URL CSV del Google Sheet pubblicato sul web
         const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ3CCm54jUvGmoX4EhdjzkWP5wu-KTVTFElQ_duTjafKpQtnaYoRI7wrW3Olo-K-peDWM441vchyNvj/pub?gid=0&single=true&output=csv";
 
-        // Mappa i nomi dei pulsanti mostrati nell'app ai possibili nomi delle colonne nel foglio
-        const STRUMENTI = {
-            "Chitarra": ["chitarra", "guitar"],
-            "Basso":    ["basso", "bass"],
-            "Batteria": ["batteria", "drums", "drum"],
-            "Lyrics":   ["lyrics", "lyric", "testo", "testi", "text"]
-        };
+        // Colonne esatte del foglio (A: Titolo, B: Artista, C: Tab Chitarra, D: Tab Basso, E: Tab Batteria, F: Lyrics)
+        const COLONNE_CONTENUTO = [
+            { etichetta: "Chitarra", colonna: "Tab Chitarra" },
+            { etichetta: "Basso",    colonna: "Tab Basso" },
+            { etichetta: "Batteria", colonna: "Tab Batteria" },
+            { etichetta: "Lyrics",   colonna: "Lyrics" }
+        ];
 
-        // Valori considerati come "vuoti / assenti" quando si legge una cella del foglio
-        const VALORI_VUOTI = ["", "null", "-", "n/d", "nd", "n/a", "na"];
-
-        // Stato in memoria: elenco completo dei brani scaricati e brano attualmente aperto
         let tuttiIBrani = [];
         let branoCorrente = null;
 
-        // Pulisce il nome di una colonna (minuscolo, senza spazi o prefisso "tab") per confrontarlo facilmente
-        function normalizzaColonna(nome) {
-            return String(nome || "").toLowerCase().replace(/^\s*tab\s*/, "").trim();
+        // Legge il valore di una colonna del foglio in modo tollerante a spazi e maiuscole/minuscole
+        function leggiColonna(riga, nomeColonna) {
+            const target = String(nomeColonna || "").trim().toLowerCase();
+            const chiave = Object.keys(riga || {}).find(k => String(k).trim().toLowerCase() === target);
+            return chiave ? String(riga[chiave] ?? "").trim() : "";
         }
 
-        // Cerca la colonna corrispondente allo strumento nel brano e restituisce il contenuto (oppure "" se vuoto)
-        function contenutoStrumento(brano, strumento) {
-            const alias = STRUMENTI[strumento];
-            const colonna = Object.keys(brano).find(k => alias.includes(normalizzaColonna(k)));
-            const valore = colonna ? String(brano[colonna] || "").trim() : "";
-            return VALORI_VUOTI.includes(valore.toLowerCase()) ? "" : valore;
-        }
-
-        // Scarica il CSV da Google Sheets tramite PapaParse e aggiorna la lista brani
+        // Scarica e analizza il CSV da Google Sheets
         function caricaDati() {
-            document.getElementById('stato-caricamento').style.display = 'block';
+            const stato = document.getElementById('stato-caricamento');
+            stato.style.display = 'block';
+            stato.textContent = "Caricamento repertorio...";
             document.getElementById('elenco-brani').innerHTML = '';
 
-            Papa.parse(GOOGLE_SHEET_CSV_URL, {
-                download: true,       // Scarica il file dall'URL
-                header: true,         // Usa la prima riga come nomi delle proprietà di ogni brano
-                skipEmptyLines: true, // Ignora le righe vuote
+            // Evita la cache del browser aggiungendo un parametro temporale
+            const urlConCacheBuster = GOOGLE_SHEET_CSV_URL +
+                (GOOGLE_SHEET_CSV_URL.includes('?') ? '&' : '?') +
+                '_=' + Date.now();
+
+            Papa.parse(urlConCacheBuster, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
                 complete: function(results) {
-                    tuttiIBrani = results.data;
-                    document.getElementById('stato-caricamento').style.display = 'none';
+                    const righe = Array.isArray(results.data) ? results.data : [];
+
+                    tuttiIBrani = righe
+                        .map(riga => ({
+                            titolo: leggiColonna(riga, "Titolo"),
+                            artista: leggiColonna(riga, "Artista"),
+                            valori: COLONNE_CONTENUTO.reduce((acc, item) => {
+                                acc[item.colonna] = leggiColonna(riga, item.colonna);
+                                return acc;
+                            }, {})
+                        }))
+                        .filter(brano => brano.titolo !== "");
+
+                    if (tuttiIBrani.length === 0) {
+                        stato.textContent = "Nessun brano trovato. Verifica che il foglio sia pubblicato come CSV e contenga la colonna 'Titolo'.";
+                        return;
+                    }
+
+                    stato.style.display = 'none';
                     renderLista(tuttiIBrani);
                 },
-                error: function() {
-                    document.getElementById('stato-caricamento').innerText = "Errore nel caricamento. Controlla il link CSV.";
+                error: function(err) {
+                    stato.textContent = "Errore durante il caricamento del Google Sheet" + (err && err.message ? ": " + err.message : ".");
                 }
             });
         }
 
-        // Genera e mostra a schermo le schede cliccabili per ciascun brano
+        // Renderizza la lista dei brani
         function renderLista(lista) {
             const container = document.getElementById('elenco-brani');
             container.innerHTML = '';
@@ -136,20 +133,17 @@
             }
 
             lista.forEach(brano => {
-                // Salta eventuali righe senza titolo
-                if (!brano.Titolo) return;
-
                 const card = document.createElement('div');
                 card.className = "bg-slate-800 hover:bg-slate-750 border border-slate-700 p-4 rounded-xl cursor-pointer transition";
                 card.onclick = () => apriBrano(brano);
 
                 const titoloEl = document.createElement('h3');
                 titoloEl.className = "font-bold text-lg text-white";
-                titoloEl.textContent = brano.Titolo;
+                titoloEl.textContent = brano.titolo;
 
                 const artistaEl = document.createElement('p');
                 artistaEl.className = "text-sm text-slate-400";
-                artistaEl.textContent = brano.Artista || '';
+                artistaEl.textContent = brano.artista;
 
                 card.appendChild(titoloEl);
                 card.appendChild(artistaEl);
@@ -157,59 +151,84 @@
             });
         }
 
-        // Filtra i brani in base al testo scritto nella barra di ricerca (titolo o artista)
+        // Filtra i brani per titolo o artista
         function filtraBrani() {
-            const query = document.getElementById('cerca').value.toLowerCase();
-            const filtrati = tuttiIBrani.filter(b => 
-                (b.Titolo && b.Titolo.toLowerCase().includes(query)) || 
-                (b.Artista && b.Artista.toLowerCase().includes(query))
+            const query = document.getElementById('cerca').value.trim().toLowerCase();
+            const filtrati = tuttiIBrani.filter(brano =>
+                brano.titolo.toLowerCase().includes(query) ||
+                brano.artista.toLowerCase().includes(query)
             );
             renderLista(filtrati);
         }
 
-        // Passa dalla lista alla schermata di dettaglio del brano e crea i pulsanti degli strumenti
+        // Apre la vista dettaglio del brano e genera i pulsanti per le colonne popolate
         function apriBrano(brano) {
             branoCorrente = brano;
             document.getElementById('vista-lista').classList.add('hidden');
             document.getElementById('vista-dettaglio').classList.remove('hidden');
 
-            document.getElementById('det-titolo').textContent = brano.Titolo;
-            document.getElementById('det-artista').textContent = brano.Artista || '';
+            document.getElementById('det-titolo').textContent = brano.titolo;
+            document.getElementById('det-artista').textContent = brano.artista;
 
             const btnContainer = document.getElementById('bottoni-strumenti');
             btnContainer.innerHTML = '';
 
-            Object.keys(STRUMENTI).forEach(strum => {
-                // Verifica se il brano ha un contenuto per questo strumento
-                const haContenuto = contenutoStrumento(brano, strum) !== "";
-                const btn = document.createElement('button');
-                btn.textContent = strum;
+            COLONNE_CONTENUTO.forEach(item => {
+                const contenuto = brano.valori[item.colonna] || "";
+                const haContenuto = contenuto !== "";
 
-                // Stile attivo se c'è contenuto, disabilitato/scuro se il campo è vuoto
-                btn.className = haContenuto 
+                const btn = document.createElement('button');
+                btn.textContent = item.etichetta;
+                btn.className = haContenuto
                     ? "py-2.5 px-3 rounded-lg font-semibold text-sm bg-slate-800 hover:bg-amber-500 hover:text-slate-950 border border-slate-600 transition"
                     : "py-2.5 px-3 rounded-lg font-semibold text-sm bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed";
-                
+
                 if (!haContenuto) {
                     btn.disabled = true;
                 } else {
-                    btn.onclick = () => mostraContenuto(strum, btn);
+                    btn.onclick = () => mostraContenuto(item.etichetta, contenuto, btn);
                 }
+
                 btnContainer.appendChild(btn);
             });
 
             document.getElementById('area-tab').innerHTML = '<p class="text-slate-500 text-center py-10">👆 Tocca uno strumento o Lyrics qui sopra.</p>';
         }
 
-        // Gestisce il click su uno strumento: apre direttamente il link in una nuova scheda oppure mostra il testo
-        function mostraContenuto(strumento, bottoneCliccato) {
-            const contenuto = contenutoStrumento(branoCorrente, strumento);
-
-            // Se è un URL http/https, apre subito una nuova scheda senza elaborarlo
+        // Se il valore è un link apre una nuova scheda; altrimenti mostra il testo nel riquadro
+        function mostraContenuto(etichetta, contenuto, bottoneCliccato) {
             if (/^https?:\/\//i.test(contenuto)) {
                 window.open(contenuto, '_blank', 'noopener,noreferrer');
                 return;
             }
 
-            // Evidenzia il pulsante selezionato per il testo/tab visualizzato in pagina
-            document
+            document.querySelectorAll('#bottoni-strumenti button').forEach(b => {
+                b.classList.remove('bg-amber-400', 'text-slate-950', 'border-amber-400');
+            });
+            bottoneCliccato.classList.add('bg-amber-400', 'text-slate-950', 'border-amber-400');
+
+            const areaTab = document.getElementById('area-tab');
+            areaTab.innerHTML = '';
+
+            const intestazione = document.createElement('div');
+            intestazione.className = "mb-2 text-xs text-amber-400 font-bold uppercase";
+            intestazione.textContent = etichetta;
+
+            const testoEl = document.createElement('div');
+            testoEl.className = "tab-text text-sm sm:text-base text-slate-100 overflow-x-auto";
+            testoEl.textContent = contenuto;
+
+            areaTab.appendChild(intestazione);
+            areaTab.appendChild(testoEl);
+        }
+
+        // Torna alla lista dei brani
+        function tornaAllaLista() {
+            document.getElementById('vista-dettaglio').classList.add('hidden');
+            document.getElementById('vista-lista').classList.remove('hidden');
+        }
+
+        caricaDati();
+    </script>
+</body>
+</html>
